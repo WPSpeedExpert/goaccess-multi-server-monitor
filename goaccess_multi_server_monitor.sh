@@ -2,7 +2,7 @@
 # =========================================================================== #
 # Script Name:       goaccess_multi_server_monitor.sh
 # Description:       Interactive GoAccess multi-server monitoring setup
-# Version:           1.2.2
+# Version:           1.2.4
 # Author:            OctaHexa Media LLC
 # Last Modified:     2025-02-05
 # Dependencies:      Debian 12, CloudPanel
@@ -11,9 +11,15 @@
 # Exit on error, undefined vars, and pipe failures
 set -euo pipefail
 
-# Logging function
+# Logging function with timestamp
 log_message() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >&2
+}
+
+# Error handling function
+error_exit() {
+    log_message "ERROR: $1"
+    exit 1
 }
 
 # Generate a secure 12-character password
@@ -32,6 +38,9 @@ validate_domain() {
 
 # Main installation function
 main_installation() {
+    # Ensure function fails on any error
+    set -e
+
     # Clear screen and display header
     clear
     echo "========================================="
@@ -40,6 +49,7 @@ main_installation() {
     echo ""
 
     # Domain configuration
+    local GOACCESS_DOMAIN
     while true; do
         read -p "Enter domain for GoAccess monitoring (e.g., stats.yourdomain.com): " GOACCESS_DOMAIN
         if validate_domain "$GOACCESS_DOMAIN"; then
@@ -50,11 +60,11 @@ main_installation() {
     done
 
     # Generate site user and password
-    SITE_USER=$(echo "$GOACCESS_DOMAIN" | awk -F. '{print $1}')
-    SITE_USER_PASSWORD=$(generate_password)
+    local SITE_USER=$(echo "$GOACCESS_DOMAIN" | awk -F. '{print $1}')
+    local SITE_USER_PASSWORD=$(generate_password)
 
     # Server configuration
-    REMOTE_SERVERS=()
+    local REMOTE_SERVERS=()
     while true; do
         read -p "Enter a remote server to monitor (format: user@hostname, or press ENTER to finish): " SERVER
         if [ -z "$SERVER" ]; then
@@ -82,8 +92,8 @@ main_installation() {
     
     read -p "Confirm installation? (y/N): " CONFIRM
     if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
-        echo "Installation cancelled."
-        exit 1
+        log_message "Installation cancelled by user."
+        return 1
     fi
 
     # Proceed with installation
@@ -91,25 +101,17 @@ main_installation() {
 
     # Create CloudPanel site as reverse proxy
     log_message "Creating CloudPanel site for GoAccess..."
-    if ! clpctl site:add:reverse-proxy \
+    clpctl site:add:reverse-proxy \
         --domainName="$GOACCESS_DOMAIN" \
         --reverseProxyUrl="http://localhost:7890" \
         --siteUser="$SITE_USER" \
-        --siteUserPassword="$SITE_USER_PASSWORD"; then
-        log_message "Failed to create CloudPanel site. Exiting."
-        exit 1
-    fi
+        --siteUserPassword="$SITE_USER_PASSWORD" \
+        || error_exit "Failed to create CloudPanel site"
 
     # Install SSL Certificate
     log_message "Installing SSL Certificate for GoAccess domain..."
-    if ! clpctl lets-encrypt:install:certificate --domainName="$GOACCESS_DOMAIN"; then
-        echo "WARNING: SSL Certificate installation failed. Please verify:"
-        echo "1. Domain DNS is correctly configured"
-        echo "2. Domain points to this server's IP"
-        echo "3. Ports 80 and 443 are open"
-        # Optionally, you could exit here or continue with a warning
-        # exit 1
-    fi
+    clpctl lets-encrypt:install:certificate --domainName="$GOACCESS_DOMAIN" \
+        || log_message "WARNING: SSL Certificate installation failed"
 
     # Create credentials file with instructions
     cat > /root/goaccess_monitor_credentials.txt << EOF
@@ -158,6 +160,13 @@ EOF
     # Create server management script
     cat > /usr/local/bin/update-server-monitoring.sh << 'EOFSCRIPT'
 #!/bin/bash
+set -euo pipefail
+
+# Ensure script runs with web-monitor user permissions
+if [[ "$EUID" -eq 0 ]]; then
+    echo "This script should be run as web-monitor, not root."
+    exit 1
+fi
 
 # Read servers from configuration file
 MONITORED_SERVERS=$(cat /etc/goaccess/monitored_servers)
@@ -169,21 +178,28 @@ for server in $MONITORED_SERVERS; do
     # Create/Update log collection script
     cat > "/usr/local/bin/collect-logs-${server_name}.sh" << EOF
 #!/bin/bash
+set -euo pipefail
 rsync -avz -e "ssh -i /home/web-monitor/.ssh/id_ed25519" \
     "${server}:/var/log/nginx/access.log" \
     "/var/log/remote-servers/${server_name}/access.log"
 EOF
     
     chmod +x "/usr/local/bin/collect-logs-${server_name}.sh"
-    chown web-monitor:web-monitor "/usr/local/bin/collect-logs-${server_name}.sh"
-    
-    # Update crontab for this server
-    (crontab -l -u web-monitor 2>/dev/null || true; echo "0 * * * * /usr/local/bin/collect-logs-${server_name}.sh") | \
-        crontab -u web-monitor -
 done
 
 echo "Server monitoring configuration updated."
 EOFSCRIPT
+
+    # Create and configure web-monitor user if not exists
+    if ! id web-monitor &>/dev/null; then
+        log_message "Creating web-monitor user..."
+        useradd -m -s /bin/bash web-monitor || error_exit "Failed to create web-monitor user"
+    fi
+
+    # Generate SSH key for web-monitor
+    log_message "Generating SSH key for web-monitor..."
+    sudo -u web-monitor ssh-keygen -t ed25519 -f /home/web-monitor/.ssh/id_ed25519 -N "" \
+        || error_exit "Failed to generate SSH key"
 
     chmod +x /usr/local/bin/update-server-monitoring.sh
     chown web-monitor:web-monitor /usr/local/bin/update-server-monitoring.sh
@@ -191,6 +207,7 @@ EOFSCRIPT
     # Create initial servers configuration file
     mkdir -p /etc/goaccess
     printf '%s\n' "${REMOTE_SERVERS[@]}" > /etc/goaccess/monitored_servers
+    chown web-monitor:web-monitor /etc/goaccess/monitored_servers
 
     # Print important installation information
     echo ""
@@ -226,22 +243,45 @@ EOFSCRIPT
     echo ""
 
     # Final success message
-    echo "GoAccess Multi-Server Monitoring installation completed successfully!"
+    log_message "GoAccess Multi-Server Monitoring installation completed successfully!"
+    
+    return 0
 }
 
-# Ensure script is run as root
-if [ "$EUID" -ne 0 ]; then
-    log_message "Please run as root"
-    exit 1
-fi
+# Main script execution
+main() {
+    # Ensure script is run as root
+    if [ "$EUID" -ne 0 ]; then
+        log_message "Please run as root"
+        exit 1
+    fi
 
-# Check CloudPanel installation
-if ! command -v clpctl &> /dev/null; then
-    log_message "CloudPanel is not installed. This script requires a pre-installed CloudPanel."
-    exit 1
-fi
+    # Check CloudPanel installation
+    if ! command -v clpctl &> /dev/null; then
+        log_message "CloudPanel is not installed. This script requires a pre-installed CloudPanel."
+        exit 1
+    fi
 
-# Run main installation
-main_installation
+    # Check if GoAccess is already installed
+    if command -v goaccess &> /dev/null; then
+        echo "GoAccess is already installed."
+        read -p "Do you want to reconfigure the existing installation? (y/N): " RECONFIGURE
+        if [[ ! "$RECONFIGURE" =~ ^[Yy]$ ]]; then
+            echo "Installation cancelled. GoAccess is already set up."
+            exit 0
+        fi
+        # If user chooses to reconfigure, continue with the script
+    fi
 
-exit 0
+    # Run main installation with error handling
+    if main_installation; then
+        log_message "Installation completed successfully."
+        exit 0
+    else
+        log_message "Installation failed or was cancelled."
+        exit 1
+    fi
+}
+
+# Execute main function
+main
