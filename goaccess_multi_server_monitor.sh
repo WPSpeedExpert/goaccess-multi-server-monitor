@@ -2,7 +2,7 @@
 # =========================================================================== #
 # Script Name:       goaccess_multi_server_monitor.sh
 # Description:       Interactive GoAccess multi-server monitoring setup
-# Version:           1.2.9
+# Version:           1.3.0
 # Author:            OctaHexa Media LLC
 # Credits:           Nginx to GoAccess log format conversion based on 
 #                    https://github.com/stockrt/nginx2goaccess
@@ -93,11 +93,19 @@ derive_siteuser() {
 # Check if a CloudPanel domain already exists
 check_domain_exists() {
     local domain=$1
-    if clpctl site:list | grep -q "${domain}"; then
+    local site_user=$(derive_siteuser "$domain")
+
+    # First, check if the user exists in CloudPanel
+    if clpctl user:list | grep -q "${site_user}"; then
         return 0 # Domain exists
-    else
-        return 1 # Domain does not exist
     fi
+
+    # Fallback: Check if the home directory for the siteuser exists
+    if [ -d "/home/${site_user}" ]; then
+        return 0 # Domain exists
+    fi
+
+    return 1 # Domain does not exist
 }
 
 # Main installation function
