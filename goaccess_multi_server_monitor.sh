@@ -197,4 +197,33 @@ if ! command -v clpctl &> /dev/null; then
 # Run main installation
 main_installation
 
+# IMPORTANT INSTALLATION INFORMATION
+    echo ""
+    echo "========================================="
+    echo "   IMPORTANT INSTALLATION INFORMATION   "
+    echo "========================================="
+    echo ""
+    echo "1. Credentials and Access:"
+    echo "   - Credentials file: /root/goaccess_monitor_credentials.txt"
+    echo "   - Access URL: https://$GOACCESS_DOMAIN"
+    echo ""
+    echo "2. Server Monitoring Management:"
+    echo "   - Add/Remove Servers: Edit /etc/goaccess/monitored_servers"
+    echo "   - Update Monitoring: /usr/local/bin/update-server-monitoring.sh"
+    echo ""
+    echo "3. SSH Key Management:"
+    echo "   - Monitoring SSH Key: /home/web-monitor/.ssh/id_ed25519"
+    echo "   - Distribute this key to remote servers using: ssh-copy-id"
+    echo ""
+    echo "4. Log Locations:"
+    echo "   - Remote Server Logs: /var/log/remote-servers/"
+    echo "   - GoAccess Reports: /home/$SITE_USER/htdocs/$GOACCESS_DOMAIN/public/reports/"
+    echo ""
+    echo "5. Configuration Files:"
+    echo "   - GoAccess Config: /etc/goaccess/goaccess.conf"
+    echo "   - Server List: /etc/goaccess/monitored_servers"
+    echo ""
+    echo "SECURITY REMINDER: Protect your SSH keys and credentials!"
+    echo ""
+
 exit 0
