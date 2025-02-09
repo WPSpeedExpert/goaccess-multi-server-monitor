@@ -2,7 +2,7 @@
 # =========================================================================== #
 # Script Name:       goaccess_multi_server_monitor.sh
 # Description:       Interactive GoAccess multi-server monitoring setup
-# Version:           1.4.0
+# Version:           1.4.1
 # Author:            OctaHexa Media LLC
 # Last Modified:     2025-02-09
 # Dependencies:      Debian 12, CloudPanel
@@ -113,6 +113,21 @@ check_domain_exists() {
     return $exists
 }
 
+# 3.3. Site User Generation
+#---------------------------------------
+# Derive site user from domain
+derive_siteuser() {
+    local domain=$1
+    local main_domain=$(echo "$domain" | awk -F. '{print $(NF-1)}')
+    local subdomain=$(echo "$domain" | awk -F. '{print $1}')
+
+    if [[ "$subdomain" == "www" || "$subdomain" == "$main_domain" ]]; then
+        echo "$main_domain"
+    else
+        echo "$main_domain-$subdomain"
+    fi
+}
+
 #===============================================
 # 4. GOACCESS SETUP
 #===============================================
@@ -183,6 +198,7 @@ EOF
 # Create server monitoring update script
 create_update_script() {
     local site_user=$1
+    local site_home="/home/${site_user}"
 
     cat > /usr/local/bin/update-server-monitoring.sh << 'EOF'
 #!/bin/bash
@@ -192,9 +208,6 @@ if [ -f /etc/goaccess/monitored_servers ]; then
     while IFS= read -r server; do
         # Skip empty lines and comments
         [[ -z "$server" || "$server" =~ ^[[:space:]]*# ]] && continue
-
-        # Ensure SSH directory exists
-        ssh-keyscan -H "$(echo "$server" | cut -d@ -f2)" >> /home/web-monitor/.ssh/known_hosts 2>/dev/null
 
         echo "Configuring monitoring for $server..."
     done < /etc/goaccess/monitored_servers
@@ -259,7 +272,7 @@ main_installation() {
             fi
         done
 
-        # Generate site user and password
+        # Generate site user and password using correct naming convention
         local SITE_USER=$(derive_siteuser "$GOACCESS_DOMAIN")
         local SITE_USER_PASSWORD=$(generate_password)
 
@@ -380,122 +393,103 @@ main_installation() {
         return 1
     fi
 
-    # 7.7. Installation Process
-    #---------------------------------------
-    log_message "Starting GoAccess Multi-Server Monitoring installation..."
+        # 7.7. Installation Process
+        #---------------------------------------
+        log_message "Starting GoAccess Multi-Server Monitoring installation..."
 
-    # Install GoAccess if not already installed
-    if ! command -v goaccess &> /dev/null; then
-        install_goaccess
-    fi
+        # Install GoAccess if not already installed
+        if ! command -v goaccess &> /dev/null; then
+            install_goaccess
+        fi
 
-    # Create web-monitor user if it doesn't exist
-    if ! id -u web-monitor >/dev/null 2>&1; then
-        useradd -m -s /bin/bash web-monitor
-    fi
+        # Create CloudPanel site
+        log_message "Creating CloudPanel site for GoAccess..."
+        clpctl site:add:reverse-proxy \
+            --domainName="$GOACCESS_DOMAIN" \
+            --reverseProxyUrl="http://localhost:7890" \
+            --siteUser="$SITE_USER" \
+            --siteUserPassword="$SITE_USER_PASSWORD" \
+            || error_exit "Failed to create CloudPanel site"
 
-    # Setup SSH keys for web-monitor user
-    setup_ssh_keys "web-monitor"
-
-    # Create CloudPanel site
-    log_message "Creating CloudPanel site for GoAccess..."
-    clpctl site:add:reverse-proxy \
-        --domainName="$GOACCESS_DOMAIN" \
-        --reverseProxyUrl="http://localhost:7890" \
-        --siteUser="$SITE_USER" \
-        --siteUserPassword="$SITE_USER_PASSWORD" \
-        || error_exit "Failed to create CloudPanel site"
-
-        # 7.8. SSL Certificate Installation
+    # 7.8. SSL Certificate Installation
     #---------------------------------------
     log_message "Installing SSL Certificate for GoAccess domain..."
     clpctl lets-encrypt:install:certificate --domainName="$GOACCESS_DOMAIN" \
         || log_message "WARNING: SSL Certificate installation failed"
 
-    # 7.9. GoAccess Configuration
-    #---------------------------------------
-    mkdir -p /etc/goaccess
-    cat > /etc/goaccess/goaccess.conf << EOF
-# GoAccess Configuration with ${LOG_FORMAT_NAME} Log Format
 
-# Time and Date Formats
-time-format %T
-date-format %d/%b/%Y
+        # 7.9. GoAccess Configuration
+            #---------------------------------------
+            mkdir -p /etc/goaccess
+            cat > /etc/goaccess/goaccess.conf << EOF
+        # GoAccess Configuration with ${LOG_FORMAT_NAME} Log Format
 
-# Log Format
-log-format $GOACCESS_LOG_FORMAT
+        # Time and Date Formats
+        time-format %T
+        date-format %d/%b/%Y
 
-# General Options
-port 7890
-real-time-html true
-ws-url wss://${GOACCESS_DOMAIN}
-output /home/${SITE_USER}/htdocs/${GOACCESS_DOMAIN}/public/index.html
-debug-file /var/log/goaccess/debug.log
+        # Log Format
+        log-format $GOACCESS_LOG_FORMAT
 
-# Log Processing Options
-keep-last 30
-load-from-disk true
+        # General Options
+        port 7890
+        real-time-html true
+        ws-url wss://${GOACCESS_DOMAIN}
+        output /home/${SITE_USER}/htdocs/${GOACCESS_DOMAIN}/public/index.html
+        debug-file /var/log/goaccess/debug.log
 
-# Persistent Storage
-db-path /var/lib/goaccess/
-restore true
-persist true
+        # Log Processing Options
+        keep-last 30
+        load-from-disk true
 
-# UI Customization
-html-report-title "Web Server Analytics"
-no-html-last-updated true
-EOF
+        # Persistent Storage
+        db-path /var/lib/goaccess/
+        restore true
+        persist true
 
-    # Store list of monitored servers
-    echo "${REMOTE_SERVERS[@]}" > /etc/goaccess/monitored_servers
+        # UI Customization
+        html-report-title "Web Server Analytics"
+        no-html-last-updated true
+        EOF
 
-    # Create update script
-    create_update_script "$SITE_USER"
+            # Store list of monitored servers
+            echo "${REMOTE_SERVERS[@]}" > /etc/goaccess/monitored_servers
 
-    # 7.10. Documentation Generation
-    #---------------------------------------
-    cat > /root/goaccess_monitor_credentials.txt << EOF
-GoAccess Multi-Server Monitoring Credentials
-============================================
-Domain: $GOACCESS_DOMAIN
-Site User: $SITE_USER
-Site User Password: $SITE_USER_PASSWORD
-Log Format: $LOG_FORMAT_NAME
+            # Create update script for server monitoring
+            create_update_script "$SITE_USER"
 
-Monitored Servers:
-$(printf '- %s\n' "${REMOTE_SERVERS[@]}")
+        # 7.10. Documentation Generation
+        #---------------------------------------
+        cat > /root/goaccess_monitor_credentials.txt << EOF
+    GoAccess Multi-Server Monitoring Credentials
+    ============================================
+    Domain: $GOACCESS_DOMAIN
+    Site User: $SITE_USER (Derived from domain name)
+    Site User Password: $SITE_USER_PASSWORD
+    Log Format: $LOG_FORMAT_NAME
 
-SSH KEY LOCATION:
-/home/web-monitor/.ssh/id_ed25519
+    Monitored Servers:
+    $(printf '- %s\n' "${REMOTE_SERVERS[@]}")
 
-Generate SSH Key (if not exists):
-ssh-keygen -t ed25519 -f /home/web-monitor/.ssh/id_ed25519 -N ""
+    SETUP INSTRUCTIONS:
+    1. SSH Setup (Manual Steps Required):
+       SSH setup should be done manually by the administrator:
+       - Log in as the site user: su - ${SITE_USER}
+       - Generate and manage SSH keys for server monitoring
+       - Configure SSH access between servers
 
-MODIFY MONITORING CONFIGURATION:
-1. Add/Remove Servers:
-   - Edit server list in /etc/goaccess/monitored_servers
-   - Run /usr/local/bin/update-server-monitoring.sh
+    2. Monitoring Configuration:
+       - Server list: /etc/goaccess/monitored_servers
+       - Update configuration: Run /usr/local/bin/update-server-monitoring.sh
 
-2. Manually Add a Server:
-   a) Copy SSH public key to new server:
-      ssh-copy-id -i /home/web-monitor/.ssh/id_ed25519.pub user@newserver.example.com
+    SECURITY NOTES:
+    - Ensure proper SSH key management
+    - Use key-based authentication
+    - Implement appropriate access controls
 
-   b) Add server to monitoring configuration:
-      echo "user@newserver.example.com" >> /etc/goaccess/monitored_servers
-      /usr/local/bin/update-server-monitoring.sh
-
-3. Remove a Server:
-   a) Remove server from /etc/goaccess/monitored_servers
-   b) Run /usr/local/bin/update-server-monitoring.sh
-
-SECURITY NOTES:
-- Protect the SSH private key
-- Use key-based authentication
-- Limit SSH access
-
-Access Web Analytics:
-https://$GOACCESS_DOMAIN
-EOF
+    Access Web Analytics:
+    https://$GOACCESS_DOMAIN
+    EOF
 
     # 7.11. Final Setup and Verification
     #---------------------------------------
@@ -537,16 +531,42 @@ main() {
     fi
 
     # 8.2. Installation Check
-    #---------------------------------------
-    # Check if GoAccess is already installed
-    if command -v goaccess &> /dev/null; then
-        echo "GoAccess is already installed."
-        read -p "Do you want to reconfigure the existing installation? (y/N): " RECONFIGURE
-        if [[ ! "$RECONFIGURE" =~ ^[Yy]$ ]]; then
-            echo "Installation cancelled. GoAccess is already set up."
-            exit 0
+        #---------------------------------------
+        # Check if GoAccess is already installed
+        if command -v goaccess &> /dev/null; then
+            echo "GoAccess is already installed."
+            echo "Options:"
+            echo "1. Reconfigure existing installation"
+            echo "2. Remove and reinstall"
+            echo "3. Abort installation"
+
+            while true; do
+                read -p "Choose an option (1/2/3): " INSTALL_CHOICE
+                case $INSTALL_CHOICE in
+                    1)
+                        log_message "Proceeding with reconfiguration..."
+                        break
+                        ;;
+                    2)
+                        log_message "Removing existing GoAccess installation..."
+                        systemctl stop goaccess || true
+                        systemctl disable goaccess || true
+                        rm -f /etc/systemd/system/goaccess.service
+                        apt-get remove -y goaccess
+                        apt-get purge -y goaccess
+                        rm -rf /etc/goaccess
+                        systemctl daemon-reload
+                        log_message "GoAccess removed. Proceeding with fresh installation..."
+                        break
+                        ;;
+                    3)
+                        log_message "Installation aborted by user."
+                        exit 0
+                        ;;
+                    *) echo "Please enter 1, 2, or 3." ;;
+                esac
+            done
         fi
-    fi
 
     # 8.3. Run Installation
     #---------------------------------------
