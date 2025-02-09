@@ -2,7 +2,7 @@
 # =========================================================================== #
 # Script Name:       goaccess_multi_server_monitor.sh
 # Description:       Interactive GoAccess multi-server monitoring setup
-# Version:           1.4.1
+# Version:           1.4.4
 # Author:            OctaHexa Media LLC
 # Last Modified:     2025-02-09
 # Dependencies:      Debian 12, CloudPanel
@@ -531,42 +531,42 @@ main() {
     fi
 
     # 8.2. Installation Check
-        #---------------------------------------
-        # Check if GoAccess is already installed
-        if command -v goaccess &> /dev/null; then
-            echo "GoAccess is already installed."
-            echo "Options:"
-            echo "1. Reconfigure existing installation"
-            echo "2. Remove and reinstall"
-            echo "3. Abort installation"
+    #---------------------------------------
+    # Check if GoAccess is already installed
+    if command -v goaccess &> /dev/null; then
+        echo "GoAccess is already installed."
+        echo "Options:"
+        echo "1. Reconfigure existing installation"
+        echo "2. Remove and reinstall"
+        echo "3. Abort installation"
 
-            while true; do
-                read -p "Choose an option (1/2/3): " INSTALL_CHOICE
-                case $INSTALL_CHOICE in
-                    1)
-                        log_message "Proceeding with reconfiguration..."
-                        break
-                        ;;
-                    2)
-                        log_message "Removing existing GoAccess installation..."
-                        systemctl stop goaccess || true
-                        systemctl disable goaccess || true
-                        rm -f /etc/systemd/system/goaccess.service
-                        apt-get remove -y goaccess
-                        apt-get purge -y goaccess
-                        rm -rf /etc/goaccess
-                        systemctl daemon-reload
-                        log_message "GoAccess removed. Proceeding with fresh installation..."
-                        break
-                        ;;
-                    3)
-                        log_message "Installation aborted by user."
-                        exit 0
-                        ;;
-                    *) echo "Please enter 1, 2, or 3." ;;
-                esac
-            done
-        fi
+        while true; do
+            read -p "Choose an option (1/2/3): " INSTALL_CHOICE
+            case $INSTALL_CHOICE in
+                1)
+                    log_message "Proceeding with reconfiguration..."
+                    break
+                    ;;
+                2)
+                    log_message "Removing existing GoAccess installation..."
+                    systemctl stop goaccess || true
+                    systemctl disable goaccess || true
+                    rm -f /etc/systemd/system/goaccess.service
+                    apt-get remove -y goaccess
+                    apt-get purge -y goaccess
+                    rm -rf /etc/goaccess
+                    systemctl daemon-reload
+                    log_message "GoAccess removed. Proceeding with fresh installation..."
+                    break
+                    ;;
+                3)
+                    log_message "Installation aborted by user."
+                    exit 0
+                    ;;
+                *) echo "Please enter 1, 2, or 3." ;;
+            esac
+        done
+    fi
 
     # 8.3. Run Installation
     #---------------------------------------
