@@ -248,46 +248,55 @@ main_installation() {
     echo ""
 
     # 7.2. Domain Configuration
-    #---------------------------------------
-    local GOACCESS_DOMAIN
-    while true; do
-        read -p "Enter domain for GoAccess monitoring (e.g., stats.yourdomain.com): " GOACCESS_DOMAIN
-        if validate_domain "$GOACCESS_DOMAIN"; then
-            break
-        else
-            echo "Please enter a valid domain name."
-        fi
-    done
-
-    # Generate site user and password
-    local SITE_USER=$(echo "$GOACCESS_DOMAIN" | awk -F. '{print $1}')
-    local SITE_USER_PASSWORD=$(generate_password)
-
-    # 7.3. Domain Existence Check
-    #---------------------------------------
-    log_message "Checking if domain already exists..."
-    if check_domain_exists "$GOACCESS_DOMAIN"; then
-        echo "Domain '$GOACCESS_DOMAIN' already exists."
+        #---------------------------------------
+        local GOACCESS_DOMAIN
         while true; do
-            read -p "Do you want to delete and recreate the site? (y/N): " DELETE_EXISTING
-            case $DELETE_EXISTING in
-                [Yy]*)
-                    log_message "Deleting existing site for domain '$GOACCESS_DOMAIN'..."
-                    if ! clpctl site:delete --domainName="$GOACCESS_DOMAIN" --force; then
-                        error_exit "Failed to delete existing domain. Exiting."
-                    fi
-                    # Wait a moment for cleanup
-                    sleep 2
-                    break
-                    ;;
-                [Nn]*|"")
-                    log_message "Installation aborted - domain already exists"
-                    return 1
-                    ;;
-                *) echo "Please answer y or n." ;;
-            esac
+            read -p "Enter domain for GoAccess monitoring (e.g., stats.octahexa.com): " GOACCESS_DOMAIN
+            if validate_domain "$GOACCESS_DOMAIN"; then
+                break
+            else
+                echo "Please enter a valid domain name."
+            fi
         done
-    fi
+
+        # Generate site user and password
+        local SITE_USER=$(derive_siteuser "$GOACCESS_DOMAIN")
+        local SITE_USER_PASSWORD=$(generate_password)
+
+        # 7.3. Domain Existence Check
+        #---------------------------------------
+        log_message "Checking if domain already exists..."
+        if check_domain_exists "$GOACCESS_DOMAIN"; then
+            echo "Domain '$GOACCESS_DOMAIN' already exists."
+            echo "Options:"
+            echo "1. Delete existing site and continue"
+            echo "2. Abort installation"
+
+            while true; do
+                read -p "Choose an option (1/2): " DOMAIN_CHOICE
+                case $DOMAIN_CHOICE in
+                    1)
+                        log_message "Deleting existing site for domain '$GOACCESS_DOMAIN'..."
+                        if ! clpctl site:delete --domainName="$GOACCESS_DOMAIN" --force; then
+                            error_exit "Failed to delete existing domain. Exiting."
+                        fi
+                        # Wait for cleanup
+                        sleep 5
+                        # Verify deletion
+                        if check_domain_exists "$GOACCESS_DOMAIN"; then
+                            error_exit "Failed to delete domain. Please remove manually and try again."
+                        fi
+                        log_message "Domain deleted successfully."
+                        break
+                        ;;
+                    2)
+                        log_message "Installation aborted by user - domain exists"
+                        exit 0
+                        ;;
+                    *) echo "Please enter 1 or 2." ;;
+                esac
+            done
+        fi
 
     # 7.4. Log Format Configuration
     #---------------------------------------
@@ -320,24 +329,38 @@ main_installation() {
     esac
 
     # 7.5. Server Configuration
-    #---------------------------------------
-    local REMOTE_SERVERS=()
-    read -p "Enter the first remote server to monitor (format: user@hostname): " SERVER
+        #---------------------------------------
+        local REMOTE_SERVERS=()
+        echo "Server Configuration:"
+        echo "Enter remote servers to monitor (leave blank to finish)"
+        echo "Format: user@hostname"
+        echo "--------------------"
 
-    # Basic validation of server entry
-    if [[ $SERVER =~ ^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+$ ]]; then
-        REMOTE_SERVERS+=("$SERVER")
-    else
-        echo "Invalid server format. Skipping server addition."
-    fi
+        while true; do
+            read -p "Enter server (or leave blank to finish): " SERVER
+            if [[ -z "$SERVER" ]]; then
+                if [ ${#REMOTE_SERVERS[@]} -eq 0 ]; then
+                    echo "At least one server must be configured."
+                    continue
+                fi
+                break
+            fi
 
-    echo ""
-    echo "Server Configuration:"
-    echo "--------------------"
-    echo "To add more servers after installation:"
-    echo "1. Edit /etc/goaccess/monitored_servers"
-    echo "2. Run /usr/local/bin/update-server-monitoring.sh"
-    echo ""
+            if [[ $SERVER =~ ^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+$ ]]; then
+                REMOTE_SERVERS+=("$SERVER")
+                echo "Server added: $SERVER"
+            else
+                echo "Invalid server format. Please use format: user@hostname"
+            fi
+        done
+
+        echo ""
+        echo "Configured Servers:"
+        echo "--------------------"
+        for server in "${REMOTE_SERVERS[@]}"; do
+            echo "- $server"
+        done
+        echo ""
 
     # 7.6. Configuration Summary
     #---------------------------------------
