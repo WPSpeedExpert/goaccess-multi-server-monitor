@@ -2,7 +2,7 @@
 # =========================================================================== #
 # Script Name:       goaccess_multi_server_monitor.sh
 # Description:       Interactive GoAccess multi-server monitoring setup
-# Version:           1.2.4
+# Version:           1.2.5
 # Author:            OctaHexa Media LLC
 # Last Modified:     2025-02-05
 # Dependencies:      Debian 12, CloudPanel
@@ -65,27 +65,29 @@ main_installation() {
 
     # Server configuration
     local REMOTE_SERVERS=()
-    while true; do
-        read -p "Enter a remote server to monitor (format: user@hostname, or press ENTER to finish): " SERVER
-        if [ -z "$SERVER" ]; then
-            break
-        fi
-        
-        # Basic validation of server entry
-        if [[ $SERVER =~ ^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+$ ]]; then
-            REMOTE_SERVERS+=("$SERVER")
-        else
-            echo "Invalid server format. Use user@hostname."
-        fi
-    done
+    read -p "Enter the first remote server to monitor (format: user@hostname): " SERVER
+
+    # Basic validation of server entry
+    if [[ $SERVER =~ ^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+$ ]]; then
+        REMOTE_SERVERS+=("$SERVER")
+    else
+        echo "Invalid server format. Skipping server addition."
+    fi
+
+    echo ""
+    echo "Server Configuration:"
+    echo "--------------------"
+    echo "To add more servers after installation:"
+    echo "1. Edit /etc/goaccess/monitored_servers"
+    echo "2. Run /usr/local/bin/update-server-monitoring.sh"
+    echo ""
 
     # Confirm configuration
-    echo ""
     echo "Configuration Summary:"
     echo "--------------------"
     echo "Monitoring Domain: $GOACCESS_DOMAIN"
     echo "Site User: $SITE_USER"
-    echo "Remote Servers to Monitor:"
+    echo "Initial Server to Monitor:"
     for server in "${REMOTE_SERVERS[@]}"; do
         echo "- $server"
     done
