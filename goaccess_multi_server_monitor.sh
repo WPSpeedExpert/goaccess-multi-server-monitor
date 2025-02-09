@@ -2,7 +2,7 @@
 # =========================================================================== #
 # Script Name:       goaccess_multi_server_monitor.sh
 # Description:       Interactive GoAccess multi-server monitoring setup
-# Version:           1.3.1
+# Version:           1.3.3
 # Author:            OctaHexa Media LLC
 # Credits:           Nginx to GoAccess log format conversion based on 
 #                    https://github.com/stockrt/nginx2goaccess
@@ -25,15 +25,17 @@ error_exit() {
 }
 
 # Derive site user from domain
+# Adheres to CloudPanel naming convention
 derive_siteuser() {
     local domain=$1
-    local site_user
-    if [[ "$domain" =~ ^www\. ]]; then
-        site_user=${domain:4} # Remove 'www.' prefix
+    local main_domain=$(echo "$domain" | awk -F. '{print $(NF-1)}')
+    local subdomain=$(echo "$domain" | awk -F. '{print $1}')
+
+    if [[ "$subdomain" == "www" || "$subdomain" == "$main_domain" ]]; then
+        echo "$main_domain"
     else
-        site_user=$domain
+        echo "$main_domain-$subdomain"
     fi
-    echo "${site_user%%.*}" # Extract site_user before the first period
 }
 
 # Check if the domain exists
@@ -42,12 +44,12 @@ check_domain_exists() {
     local site_user=$(derive_siteuser "$domain")
 
     # First, check if the user exists in CloudPanel
-    if clpctl user:list | grep -q "${site_user}"; then
+    if clpctl user:list | grep -q "$site_user"; then
         return 0 # Domain exists
     fi
 
     # Fallback: Check if the home directory for the siteuser exists
-    if [ -d "/home/${site_user}" ]; then
+    if [ -d "/home/$site_user" ]; then
         return 0 # Domain exists
     fi
 
@@ -82,7 +84,7 @@ nginx2goaccess() {
         goaccess_var="${item##*,}"
         
         # Replace ${variable} syntax
-        log_format="${log_format//\${nginx_var\}/$goaccess_var}"
+        log_format="${log_format//\${nginx_var}/$goaccess_var}"
         # Replace $variable syntax
         log_format="${log_format//\$nginx_var/$goaccess_var}"
     done
