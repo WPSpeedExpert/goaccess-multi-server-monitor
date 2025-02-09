@@ -380,39 +380,39 @@ main_installation() {
             # GoAccess Configuration
             #---------------------------------------
             mkdir -p /etc/goaccess
-            cat > /etc/goaccess/goaccess.conf << EOF
-        # GoAccess Configuration with ${LOG_FORMAT_NAME} Log Format
+            cat > /etc/goaccess/goaccess.conf << 'EOF'
+            # GoAccess Configuration with ${LOG_FORMAT_NAME} Log Format
 
-        # Time and Date Formats
-        time-format %T
-        date-format %d/%b/%Y
+            # Time and Date Formats
+            time-format %T
+            date-format %d/%b/%Y
 
-        # Log Format
-        log-format $GOACCESS_LOG_FORMAT
+            # Log Format
+            log-format $GOACCESS_LOG_FORMAT
 
-        # General Options
-        port 7890
-        real-time-html true
-        ws-url wss://${GOACCESS_DOMAIN}
-        output /home/${SITE_USER}/htdocs/${GOACCESS_DOMAIN}/public/index.html
-        debug-file /var/log/goaccess/debug.log
+            # General Options
+            port 7890
+            real-time-html true
+            ws-url wss://${GOACCESS_DOMAIN}
+            output /home/${SITE_USER}/htdocs/${GOACCESS_DOMAIN}/public/index.html
+            debug-file /var/log/goaccess/debug.log
 
-        # Log Processing Options
-        keep-last 30
-        load-from-disk true
+            # Log Processing Options
+            keep-last 30
+            load-from-disk true
 
-        # Persistent Storage
-        db-path /var/lib/goaccess/
-        restore true
-        persist true
+            # Persistent Storage
+            db-path /var/lib/goaccess/
+            restore true
+            persist true
 
-        # UI Customization
-        html-report-title "Web Server Analytics"
-        no-html-last-updated true
-        EOF
+            # UI Customization
+            html-report-title "Web Server Analytics"
+            no-html-last-updated true
+            EOF
 
-            # Store list of monitored servers
-            echo "${REMOTE_SERVERS[@]}" > /etc/goaccess/monitored_servers
+                # Store list of monitored servers
+                echo "${REMOTE_SERVERS[@]}" > /etc/goaccess/monitored_servers
 
             # Create update script
             create_update_script "$SITE_USER"
@@ -421,48 +421,48 @@ main_installation() {
             # Documentation Generation
             #---------------------------------------
             # Create credentials file with instructions
-            cat > /root/goaccess_monitor_credentials.txt << EOF
-        GoAccess Multi-Server Monitoring Credentials
-        ============================================
-        Domain: $GOACCESS_DOMAIN
-        Site User: $SITE_USER
-        Site User Password: $SITE_USER_PASSWORD
-        Log Format: $LOG_FORMAT_NAME
+            cat > /root/goaccess_monitor_credentials.txt << 'EOF'
+            GoAccess Multi-Server Monitoring Credentials
+            ============================================
+            Domain: $GOACCESS_DOMAIN
+            Site User: $SITE_USER
+            Site User Password: $SITE_USER_PASSWORD
+            Log Format: $LOG_FORMAT_NAME
 
-        Monitored Servers:
-        $(printf '- %s\n' "${REMOTE_SERVERS[@]}")
+            Monitored Servers:
+            $(printf '- %s\n' "${REMOTE_SERVERS[@]}")
 
-        SSH KEY LOCATION:
-        /home/web-monitor/.ssh/id_ed25519
+            SSH KEY LOCATION:
+            /home/web-monitor/.ssh/id_ed25519
 
-        Generate SSH Key (if not exists):
-        ssh-keygen -t ed25519 -f /home/web-monitor/.ssh/id_ed25519 -N ""
+            Generate SSH Key (if not exists):
+            ssh-keygen -t ed25519 -f /home/web-monitor/.ssh/id_ed25519 -N ""
 
-        MODIFY MONITORING CONFIGURATION:
-        1. Add/Remove Servers:
-           - Edit server list in /etc/goaccess/monitored_servers
-           - Run /usr/local/bin/update-server-monitoring.sh
+            MODIFY MONITORING CONFIGURATION:
+            1. Add/Remove Servers:
+               - Edit server list in /etc/goaccess/monitored_servers
+               - Run /usr/local/bin/update-server-monitoring.sh
 
-        2. Manually Add a Server:
-           a) Copy SSH public key to new server:
-              ssh-copy-id -i /home/web-monitor/.ssh/id_ed25519.pub user@newserver.example.com
+            2. Manually Add a Server:
+               a) Copy SSH public key to new server:
+                  ssh-copy-id -i /home/web-monitor/.ssh/id_ed25519.pub user@newserver.example.com
 
-           b) Add server to monitoring configuration:
-              echo "user@newserver.example.com" >> /etc/goaccess/monitored_servers
-              /usr/local/bin/update-server-monitoring.sh
+               b) Add server to monitoring configuration:
+                  echo "user@newserver.example.com" >> /etc/goaccess/monitored_servers
+                  /usr/local/bin/update-server-monitoring.sh
 
-        3. Remove a Server:
-           a) Remove server from /etc/goaccess/monitored_servers
-           b) Run /usr/local/bin/update-server-monitoring.sh
+            3. Remove a Server:
+               a) Remove server from /etc/goaccess/monitored_servers
+               b) Run /usr/local/bin/update-server-monitoring.sh
 
-        SECURITY NOTES:
-        - Protect the SSH private key
-        - Use key-based authentication
-        - Limit SSH access
+            SECURITY NOTES:
+            - Protect the SSH private key
+            - Use key-based authentication
+            - Limit SSH access
 
-        Access Web Analytics:
-        https://$GOACCESS_DOMAIN
-        EOF
+            Access Web Analytics:
+            https://$GOACCESS_DOMAIN
+            EOF
 
             #---------------------------------------
             # Final Setup and Verification
