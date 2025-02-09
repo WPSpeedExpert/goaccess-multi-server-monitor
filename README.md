@@ -71,7 +71,7 @@ Edit the following files to customize behavior:
 
 ### License
 
-[Your License Here]
+GPL 3
 
 ### Contributing
 
