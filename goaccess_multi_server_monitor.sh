@@ -2,7 +2,7 @@
 # =========================================================================== #
 # Script Name:       goaccess_multi_server_monitor.sh
 # Description:       Interactive GoAccess multi-server monitoring setup
-# Version:           1.2.7
+# Version:           1.2.9
 # Author:            OctaHexa Media LLC
 # Credits:           Nginx to GoAccess log format conversion based on 
 #                    https://github.com/stockrt/nginx2goaccess
@@ -90,6 +90,16 @@ derive_siteuser() {
     fi
 }
 
+# Check if a CloudPanel domain already exists
+check_domain_exists() {
+    local domain=$1
+    if clpctl site:list | grep -q "${domain}"; then
+        return 0 # Domain exists
+    else
+        return 1 # Domain does not exist
+    fi
+}
+
 # Main installation function
 main_installation() {
     set -e  # Ensure function fails on any error
@@ -114,6 +124,30 @@ main_installation() {
     # Derive siteuser from domain
     local SITE_USER=$(derive_siteuser "$GOACCESS_DOMAIN")
     local SITE_USER_PASSWORD=$(generate_password)
+
+    # Check if the domain already exists
+    if check_domain_exists "$GOACCESS_DOMAIN"; then
+        log_message "Domain $GOACCESS_DOMAIN already exists."
+        echo "Options:"
+        echo "1) Stop the installation"
+        echo "2) Delete the domain and recreate it"
+        read -p "Enter your choice (1-2): " DOMAIN_ACTION
+
+        case $DOMAIN_ACTION in
+            1)
+                log_message "Installation stopped by user."
+                exit 0
+                ;;
+            2)
+                log_message "Deleting existing domain $GOACCESS_DOMAIN..."
+                clpctl site:delete --domainName="$GOACCESS_DOMAIN" --force || error_exit "Failed to delete domain $GOACCESS_DOMAIN."
+                log_message "Domain $GOACCESS_DOMAIN deleted successfully."
+                ;;
+            *)
+                error_exit "Invalid choice. Exiting installation."
+                ;;
+        esac
+    fi
 
     # Log format configuration
     echo ""
