@@ -2,19 +2,19 @@
 
 ## Overview
 
-This script provides a comprehensive solution for centralized web log monitoring across multiple servers using GoAccess, integrated with CloudPanel on Debian 12.
+Centralized web log monitoring solution for multiple servers using GoAccess, seamlessly integrated with CloudPanel on Debian 12.
 
-### Key Features
+### Features
 
 - 🌐 Centralized web analytics for multiple servers
-- 🔒 Secure SSH-based log collection
+- 🔒 Secure, interactive SSH-based log collection
 - 📊 Real-time and historical web traffic analysis
 - 🖥️ CloudPanel integration
 - 🛡️ Enhanced security practices
 
 ### Prerequisites
 
-- Debian 12
+- Debian 12 server
 - CloudPanel pre-installed
 - SSH access to remote servers
 - Root access on the monitoring server
@@ -31,56 +31,93 @@ sudo ./goaccess_multi_server_monitor.sh && \
 rm goaccess_multi_server_monitor.sh
 ```
 
-### Pre-Installation Steps
+### Installation Process
 
-1. Ensure CloudPanel is installed
-2. Prepare SSH key-based authentication for remote servers
-3. Verify firewall configurations
+1. Run the installation script
+2. Interactively enter:
+   - GoAccess monitoring domain
+   - Remote servers to monitor
+3. Confirm installation details
+4. Automatic setup completes
 
 ### Post-Installation
 
-1. Review `/root/multi_server_goaccess_setup.txt` for detailed configuration
-2. Distribute SSH public key to remote servers
-3. Configure firewall rules as needed
+#### Credentials and Access
+
+- Credentials stored in: `/root/goaccess_monitor_credentials.txt`
+- Web Analytics Access URL provided during installation
+
+### Server Monitoring Management
+
+#### Adding New Servers
+
+1. Edit `/etc/goaccess/monitored_servers`
+2. Add server in `user@hostname` format
+3. Run update script:
+   ```bash
+   /usr/local/bin/update-server-monitoring.sh
+   ```
+
+#### SSH Key Distribution
+
+1. Locate monitoring SSH key:
+   ```bash
+   /home/web-monitor/.ssh/id_ed25519
+   ```
+
+2. Distribute to a new server:
+   ```bash
+   ssh-copy-id -i /home/web-monitor/.ssh/id_ed25519.pub user@newserver.example.com
+   ```
+
+### Key Locations
+
+- Remote Server Logs: `/var/log/remote-servers/`
+- GoAccess Reports: `/home/[site-user]/htdocs/[domain]/public/reports/`
+- Configuration: `/etc/goaccess/`
 
 ### Security Recommendations
 
-- Use strong, unique passwords
+- Protect SSH private key
+- Use key-based authentication
 - Limit SSH access
-- Implement fail2ban
 - Regularly update and patch systems
 
 ### Troubleshooting
 
-- Check log files in `/var/log/remote-servers/`
-- Verify cron job configurations
-- Inspect GoAccess service status: `systemctl status goaccess`
-
-### Log Collection Details
-
-- Logs are collected hourly via rsync
-- Processed logs stored in `/var/log/remote-servers/`
-- Reports generated in `/home/[site-user]/htdocs/[domain]/public/reports/`
+- Check log files: `/var/log/remote-servers/`
+- Verify cron jobs
+- Check GoAccess service: `systemctl status goaccess`
 
 ### Customization
 
-Edit the following files to customize behavior:
+Modify these files to customize behavior:
 - `/etc/goaccess/goaccess.conf`: GoAccess configuration
-- `/usr/local/bin/process-multi-server-logs.sh`: Log processing script
+- `/usr/local/bin/process-multi-server-logs.sh`: Log processing
 - Cron jobs for log collection timing
 
 ### License
 
-GPL 3
+This project is licensed under the GNU General Public License v3.0 (GPL-3.0). 
+
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
+A full copy of the license is available in the `LICENSE` file in the repository. 
+
+Key points of the GPL-3.0:
+- You are free to use, modify, and distribute the software
+- Any modifications or derivative works must also be licensed under GPL-3.0
+- You must include the original copyright notice
+- Source code must be made available for any distributed versions
 
 ### Contributing
 
-Contributions are welcome! Please submit pull requests or open issues on the GitHub repository.
+Contributions welcome! Submit pull requests or open issues on the GitHub repository.
 
 ### Support
 
-For issues or support, please [create an issue on GitHub](https://github.com/OctaHexa/goaccess-multi-server-monitor/issues)
+For issues or support, [create an issue on GitHub](https://github.com/WPSpeedExpert/goaccess-multi-server-monitor/issues)
 
 ---
 
-*Created by OctaHexa Media LLC | Web Analytics Monitoring Solution*
+*Created by OctaHexa Media LLC | Comprehensive Web Analytics Monitoring*
