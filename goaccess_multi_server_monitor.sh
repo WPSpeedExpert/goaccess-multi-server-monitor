@@ -2,7 +2,7 @@
 # =========================================================================== #
 # Script Name:       goaccess_multi_server_monitor.sh
 # Description:       Interactive GoAccess multi-server monitoring setup
-# Version:           1.3.4
+# Version:           1.3.2
 # Author:            OctaHexa Media LLC
 # Credits:           Nginx to GoAccess log format conversion based on 
 #                    https://github.com/stockrt/nginx2goaccess
@@ -27,13 +27,14 @@ error_exit() {
 # Derive site user from domain
 derive_siteuser() {
     local domain=$1
-    local site_user
-    if [[ "$domain" =~ ^www\. ]]; then
-        site_user=${domain:4} # Remove 'www.' prefix
+    local main_domain=$(echo "$domain" | awk -F. '{print $(NF-1)}')
+    local subdomain=$(echo "$domain" | awk -F. '{print $1}')
+
+    if [[ "$subdomain" == "www" || "$subdomain" == "$main_domain" ]]; then
+        echo "$main_domain"
     else
-        site_user=$domain
+        echo "$main_domain-$subdomain"
     fi
-    echo "${site_user%%.*}" # Extract site_user before the first period
 }
 
 # Check if the domain exists
@@ -273,16 +274,12 @@ GoAccess Multi-Server Monitoring Credentials
 Domain: $GOACCESS_DOMAIN
 Site User: $SITE_USER
 Site User Password: $SITE_USER_PASSWORD
-Log Format: $LOG_FORMAT_NAME
 
 Monitored Servers:
 $(printf '- %s\n' "${REMOTE_SERVERS[@]}")
 
 SSH KEY LOCATION:
 /home/${SITE_USER}/.ssh/id_ed25519
-
-Generate SSH Key (if not exists):
-ssh-keygen -t ed25519 -f /home/${SITE_USER}/.ssh/id_ed25519 -N ""
 
 MODIFY MONITORING CONFIGURATION:
 1. Add/Remove Servers:
@@ -310,9 +307,44 @@ Access Web Analytics:
 https://$GOACCESS_DOMAIN
 EOF
 
+    chmod 600 /root/goaccess_monitor_credentials.txt
+
+    # Print important installation information
+    echo ""
+    echo "========================================="
+    echo "   IMPORTANT INSTALLATION INFORMATION   "
+    echo "========================================="
+    echo ""
+    echo "1. Credentials and Access:"
+    echo "   - Credentials file: /root/goaccess_monitor_credentials.txt"
+    echo "   - Access URL: https://$GOACCESS_DOMAIN"
+    echo ""
+    echo "2. Server Monitoring Management:"
+    echo "   - Add/Remove Servers: Edit /etc/goaccess/monitored_servers"
+    echo "   - Update Monitoring: /usr/local/bin/update-server-monitoring.sh"
+    echo ""
+    echo "3. SSL Certificate:"
+    echo "   - Domain: $GOACCESS_DOMAIN"
+    echo "   - Installed via Let's Encrypt"
+    echo ""
+    echo "4. SSH Key Management:"
+    echo "   - Monitoring SSH Key: /home/${SITE_USER}/.ssh/id_ed25519"
+    echo "   - Distribute this key to remote servers using: ssh-copy-id"
+    echo ""
+    echo "5. Log Locations:"
+    echo "   - Remote Server Logs: /var/log/remote-servers/"
+    echo "   - GoAccess Reports: /home/$SITE_USER/htdocs/$GOACCESS_DOMAIN/public/reports/"
+    echo ""
+    echo "6. Configuration Files:"
+    echo "   - GoAccess Config: /etc/goaccess/goaccess.conf"
+    echo "   - Server List: /etc/goaccess/monitored_servers"
+    echo ""
+    echo "SECURITY REMINDER: Protect your SSH keys and credentials!"
+    echo ""
+
     # Final success message
     log_message "GoAccess Multi-Server Monitoring installation completed successfully!"
-    
+    echo "Access the monitoring dashboard at: https://$GOACCESS_DOMAIN"
     return 0
 }
 
@@ -338,7 +370,6 @@ main() {
             echo "Installation cancelled. GoAccess is already set up."
             exit 0
         fi
-        # If user chooses to reconfigure, continue with the script
     fi
 
     # Run main installation with error handling
