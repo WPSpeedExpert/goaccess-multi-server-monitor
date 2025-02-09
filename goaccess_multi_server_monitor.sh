@@ -233,7 +233,39 @@ Site User: $SITE_USER
 Site User Password: $SITE_USER_PASSWORD
 Log Format: $LOG_FORMAT_NAME
 
-[... rest of the previous credentials content ...]
+Monitored Servers:
+$(printf '- %s\n' "${REMOTE_SERVERS[@]}")
+
+SSH KEY LOCATION:
+/home/web-monitor/.ssh/id_ed25519
+
+Generate SSH Key (if not exists):
+ssh-keygen -t ed25519 -f /home/web-monitor/.ssh/id_ed25519 -N ""
+
+MODIFY MONITORING CONFIGURATION:
+1. Add/Remove Servers:
+   - Edit server list in /etc/goaccess/monitored_servers
+   - Run /usr/local/bin/update-server-monitoring.sh
+
+2. Manually Add a Server:
+   a) Copy SSH public key to new server:
+      ssh-copy-id -i /home/web-monitor/.ssh/id_ed25519.pub user@newserver.example.com
+
+   b) Add server to monitoring configuration:
+      echo "user@newserver.example.com" >> /etc/goaccess/monitored_servers
+      /usr/local/bin/update-server-monitoring.sh
+
+3. Remove a Server:
+   a) Remove server from /etc/goaccess/monitored_servers
+   b) Run /usr/local/bin/update-server-monitoring.sh
+
+SECURITY NOTES:
+- Protect the SSH private key
+- Use key-based authentication
+- Limit SSH access
+
+Access Web Analytics:
+https://$GOACCESS_DOMAIN
 EOF
 
     # Continue with the rest of the installation steps...
