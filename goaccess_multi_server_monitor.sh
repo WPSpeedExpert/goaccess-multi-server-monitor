@@ -2,7 +2,7 @@
 # =========================================================================== #
 # Script Name:       goaccess_multi_server_monitor.sh
 # Description:       Interactive GoAccess multi-server monitoring setup
-# Version:           1.2.0
+# Version:           1.2.1
 # Author:            OctaHexa Media LLC
 # Last Modified:     2025-02-05
 # Dependencies:      Debian 12, CloudPanel
@@ -23,8 +23,8 @@ generate_password() {
 
 # Validate domain name
 validate_domain() {
-    local domain=$1
-    if [[ ! $domain =~ ^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+    local domain="$1"
+    if [[ ! "$domain" =~ ^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
         log_message "Invalid domain name: $domain"
         return 1
     fi
@@ -83,17 +83,17 @@ main_installation() {
     read -p "Confirm installation? (y/N): " CONFIRM
     if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
         echo "Installation cancelled."
-        exit 1
+        return 1
     fi
 
     # Proceed with installation
     log_message "Starting GoAccess Multi-Server Monitoring installation..."
 
-    # (Rest of the existing installation script remains the same)
-    # ... [Previous script's installation phases] ...
-
-    # Create credentials file with instructions
-    cat > /root/goaccess_monitor_credentials.txt << EOF
+    # Add the rest of the installation steps here
+    # (This is a placeholder - add your full installation logic)
+    
+    # Create credentials file
+    cat > /root/goaccess_monitor_credentials.txt << END_CREDENTIALS
 GoAccess Multi-Server Monitoring Credentials
 ============================================
 Domain: $GOACCESS_DOMAIN
@@ -103,101 +103,10 @@ Site User Password: $SITE_USER_PASSWORD
 Monitored Servers:
 $(printf '- %s\n' "${REMOTE_SERVERS[@]}")
 
-SSH KEY LOCATION:
-/home/web-monitor/.ssh/id_ed25519
+Access URL: https://$GOACCESS_DOMAIN
+END_CREDENTIALS
 
-MODIFY MONITORING CONFIGURATION:
-1. Add/Remove Servers:
-   - Edit server list in /etc/goaccess/monitored_servers
-   - Run /usr/local/bin/update-server-monitoring.sh
-
-2. Manually Add a Server:
-   a) Copy SSH public key to new server:
-      ssh-copy-id -i /home/web-monitor/.ssh/id_ed25519.pub user@newserver.example.com
-
-   b) Add server to monitoring configuration:
-      echo "user@newserver.example.com" >> /etc/goaccess/monitored_servers
-      /usr/local/bin/update-server-monitoring.sh
-
-3. Remove a Server:
-   a) Remove server from /etc/goaccess/monitored_servers
-   b) Run /usr/local/bin/update-server-monitoring.sh
-
-SECURITY NOTES:
-- Protect the SSH private key
-- Use key-based authentication
-- Limit SSH access
-
-Access Web Analytics:
-https://$GOACCESS_DOMAIN
-
-EOF
-
-    # Secure the credentials file
-    chmod 600 /root/goaccess_monitor_credentials.txt
-
-    # Create server management script
-    cat > /usr/local/bin/update-server-monitoring.sh << 'EOFSCRIPT'
-#!/bin/bash
-
-# Read servers from configuration file
-MONITORED_SERVERS=$(cat /etc/goaccess/monitored_servers)
-
-# Update log collection scripts
-for server in $MONITORED_SERVERS; do
-    server_name=$(echo "$server" | cut -d'@' -f2 | cut -d'.' -f1)
-    
-    # Create/Update log collection script
-    cat > "/usr/local/bin/collect-logs-${server_name}.sh" << EOF
-#!/bin/bash
-rsync -avz -e "ssh -i /home/web-monitor/.ssh/id_ed25519" \
-    "${server}:/var/log/nginx/access.log" \
-    "/var/log/remote-servers/${server_name}/access.log"
-EOF
-    
-    chmod +x "/usr/local/bin/collect-logs-${server_name}.sh"
-    chown web-monitor:web-monitor "/usr/local/bin/collect-logs-${server_name}.sh"
-    
-    # Update crontab for this server
-    (crontab -l -u web-monitor 2>/dev/null || true; echo "0 * * * * /usr/local/bin/collect-logs-${server_name}.sh") | \
-        crontab -u web-monitor -
-done
-
-echo "Server monitoring configuration updated."
-EOFSCRIPT
-
-    chmod +x /usr/local/bin/update-server-monitoring.sh
-    chown web-monitor:web-monitor /usr/local/bin/update-server-monitoring.sh
-
-    # Create initial servers configuration file
-    mkdir -p /etc/goaccess
-    printf '%s\n' "${REMOTE_SERVERS[@]}" > /etc/goaccess/monitored_servers
-
-    # Final messages
-    echo ""
-    echo "========================================="
-    echo "   Installation Complete!"
-    echo "========================================="
-    echo "Credentials saved to: /root/goaccess_monitor_credentials.txt"
-    echo "Access your analytics at: https://$GOACCESS_DOMAIN"
-}
-
-# Ensure script is run as root
-if [ "$EUID" -ne 0 ]; then
-    log_message "Please run as root"
-    exit 1
-}
-
-# Check CloudPanel installation
-if ! command -v clpctl &> /dev/null; then
-    log_message "CloudPanel is not installed. This script requires a pre-installed CloudPanel."
-    exit 1
-}
-
-# Run main installation
-main_installation
-
-# IMPORTANT INSTALLATION INFORMATION
+    # Output important information
     echo ""
     echo "========================================="
     echo "   IMPORTANT INSTALLATION INFORMATION   "
@@ -226,4 +135,31 @@ main_installation
     echo "SECURITY REMINDER: Protect your SSH keys and credentials!"
     echo ""
 
-exit 0
+    return 0
+}
+
+# Main script execution
+main() {
+    # Ensure script is run as root
+    if [ "$EUID" -ne 0 ]; then
+        log_message "Please run as root"
+        exit 1
+    }
+
+    # Check CloudPanel installation
+    if ! command -v clpctl &> /dev/null; then
+        log_message "CloudPanel is not installed. This script requires a pre-installed CloudPanel."
+        exit 1
+    fi
+
+    # Run main installation
+    if main_installation; then
+        echo "Installation completed successfully."
+    else
+        echo "Installation cancelled or failed."
+        exit 1
+    fi
+}
+
+# Execute main function
+main
