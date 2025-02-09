@@ -2,7 +2,7 @@
 # =========================================================================== #
 # Script Name:       goaccess_multi_server_monitor.sh
 # Description:       Interactive GoAccess multi-server monitoring setup
-# Version:           1.3.2
+# Version:           1.3.3
 # Author:            OctaHexa Media LLC
 # Credits:           Nginx to GoAccess log format conversion based on 
 #                    https://github.com/stockrt/nginx2goaccess
@@ -43,12 +43,12 @@ check_domain_exists() {
     local site_user=$(derive_siteuser "$domain")
 
     # First, check if the user exists in CloudPanel
-    if clpctl user:list | grep -q "${site_user}"; then
+    if clpctl user:list | grep -q "$site_user"; then
         return 0 # Domain exists
     fi
 
     # Fallback: Check if the home directory for the siteuser exists
-    if [ -d "/home/${site_user}" ]; then
+    if [ -d "/home/$site_user" ]; then
         return 0 # Domain exists
     fi
 
@@ -56,7 +56,6 @@ check_domain_exists() {
 }
 
 # Nginx to GoAccess log format conversion function
-# Original script: https://github.com/stockrt/nginx2goaccess
 nginx2goaccess() {
     local log_format="$1"
     local conversion_table=(
@@ -81,7 +80,7 @@ nginx2goaccess() {
     for item in "${conversion_table[@]}"; do
         nginx_var="${item%%,*}"
         goaccess_var="${item##*,}"
-        
+
         # Replace ${variable} syntax
         log_format="${log_format//\${nginx_var\}/$goaccess_var}"
         # Replace $variable syntax
@@ -108,12 +107,30 @@ validate_domain() {
     fi
 }
 
+# Check and optionally reinstall GoAccess
+check_goaccess_installation() {
+    if command -v goaccess &> /dev/null; then
+        echo "GoAccess is already installed."
+        read -p "Do you want to reinstall GoAccess? (y/N): " REINSTALL
+        if [[ "$REINSTALL" =~ ^[Yy]$ ]]; then
+            log_message "Reinstalling GoAccess..."
+            apt-get remove --purge -y goaccess || true
+            apt-get install -y goaccess || error_exit "Failed to reinstall GoAccess."
+            log_message "GoAccess reinstalled successfully."
+        else
+            log_message "Skipping GoAccess reinstallation."
+        fi
+    else
+        log_message "Installing GoAccess..."
+        apt-get install -y goaccess || error_exit "Failed to install GoAccess."
+        log_message "GoAccess installed successfully."
+    fi
+}
+
 # Main installation function
 main_installation() {
-    # Ensure function fails on any error
-    set -e
+    set -e  # Ensure function fails on any error
 
-    # Clear screen and display header
     clear
     echo "========================================="
     echo "   GoAccess Multi-Server Monitoring     "
@@ -131,9 +148,33 @@ main_installation() {
         fi
     done
 
-    # Generate site user and password
+    # Derive siteuser from domain
     local SITE_USER=$(derive_siteuser "$GOACCESS_DOMAIN")
     local SITE_USER_PASSWORD=$(generate_password)
+
+    # Check if the domain already exists
+    if check_domain_exists "$GOACCESS_DOMAIN"; then
+        log_message "Domain $GOACCESS_DOMAIN already exists."
+        echo "Options:"
+        echo "1) Stop the installation"
+        echo "2) Delete the domain and recreate it"
+        read -p "Enter your choice (1-2): " DOMAIN_ACTION
+
+        case $DOMAIN_ACTION in
+            1)
+                log_message "Installation stopped by user."
+                exit 0
+                ;;
+            2)
+                log_message "Deleting existing domain $GOACCESS_DOMAIN..."
+                clpctl site:delete --domainName="$GOACCESS_DOMAIN" --force || error_exit "Failed to delete domain $GOACCESS_DOMAIN."
+                log_message "Domain $GOACCESS_DOMAIN deleted successfully."
+                ;;
+            *)
+                error_exit "Invalid choice. Exiting installation."
+                ;;
+        esac
+    fi
 
     # Log format configuration
     echo ""
@@ -197,28 +238,8 @@ main_installation() {
         return 1
     fi
 
-    # Check if domain already exists
-    log_message "Checking if domain already exists..."
-    if check_domain_exists "$GOACCESS_DOMAIN"; then
-        echo "Domain '$GOACCESS_DOMAIN' already exists."
-        while true; do
-            read -p "Do you want to delete and recreate the site? (y/N): " DELETE_EXISTING
-            case $DELETE_EXISTING in
-                [Yy]*)
-                    log_message "Deleting existing site for domain '$GOACCESS_DOMAIN'..."
-                    if ! clpctl site:delete --domainName="$GOACCESS_DOMAIN" --force; then
-                        error_exit "Failed to delete existing domain. Exiting."
-                    fi
-                    break
-                    ;;
-                [Nn]*|"")
-                    log_message "Aborting site creation for existing domain '$GOACCESS_DOMAIN'."
-                    exit 1
-                    ;;
-                *) echo "Please answer y or n." ;;
-            esac
-        done
-    fi
+    # Check and install GoAccess
+    check_goaccess_installation
 
     # Proceed to create the site
     log_message "Creating CloudPanel site for GoAccess..."
@@ -307,8 +328,6 @@ Access Web Analytics:
 https://$GOACCESS_DOMAIN
 EOF
 
-    chmod 600 /root/goaccess_monitor_credentials.txt
-
     # Print important installation information
     echo ""
     echo "========================================="
@@ -363,14 +382,7 @@ main() {
     fi
 
     # Check if GoAccess is already installed
-    if command -v goaccess &> /dev/null; then
-        echo "GoAccess is already installed."
-        read -p "Do you want to reconfigure the existing installation? (y/N): " RECONFIGURE
-        if [[ ! "$RECONFIGURE" =~ ^[Yy]$ ]]; then
-            echo "Installation cancelled. GoAccess is already set up."
-            exit 0
-        fi
-    fi
+    check_goaccess_installation
 
     # Run main installation with error handling
     if main_installation; then
