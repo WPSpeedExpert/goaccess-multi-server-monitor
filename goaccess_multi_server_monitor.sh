@@ -2,7 +2,7 @@
 # =========================================================================== #
 # Script Name:       goaccess_multi_server_monitor.sh
 # Description:       Interactive GoAccess multi-server monitoring setup
-# Version:           1.3.0
+# Version:           1.3.1
 # Author:            OctaHexa Media LLC
 # Credits:           Nginx to GoAccess log format conversion based on 
 #                    https://github.com/stockrt/nginx2goaccess
@@ -22,6 +22,36 @@ log_message() {
 error_exit() {
     log_message "ERROR: $1"
     exit 1
+}
+
+# Derive site user from domain
+derive_siteuser() {
+    local domain=$1
+    local site_user
+    if [[ "$domain" =~ ^www\. ]]; then
+        site_user=${domain:4} # Remove 'www.' prefix
+    else
+        site_user=$domain
+    fi
+    echo "${site_user%%.*}" # Extract site_user before the first period
+}
+
+# Check if the domain exists
+check_domain_exists() {
+    local domain=$1
+    local site_user=$(derive_siteuser "$domain")
+
+    # First, check if the user exists in CloudPanel
+    if clpctl user:list | grep -q "${site_user}"; then
+        return 0 # Domain exists
+    fi
+
+    # Fallback: Check if the home directory for the siteuser exists
+    if [ -d "/home/${site_user}" ]; then
+        return 0 # Domain exists
+    fi
+
+    return 1 # Domain does not exist
 }
 
 # Nginx to GoAccess log format conversion function
@@ -52,13 +82,13 @@ nginx2goaccess() {
         goaccess_var="${item##*,}"
         
         # Replace ${variable} syntax
-        log_format="${log_format//\$\{$nginx_var\}/$goaccess_var}"
+        log_format="${log_format//\${nginx_var\}/$goaccess_var}"
         # Replace $variable syntax
-        log_format="${log_format//\$$nginx_var/$goaccess_var}"
+        log_format="${log_format//\$nginx_var/$goaccess_var}"
     done
 
     # Replace any remaining unhandled variables with %^
-    log_format=$(echo "$log_format" | sed -E 's/\$\{?[a-z_]+\}?/%^/g')
+    log_format=$(echo "$log_format" | sed -E 's/\${?[a-z_]+}?/%^/g')
 
     echo "$log_format"
 }
@@ -77,41 +107,12 @@ validate_domain() {
     fi
 }
 
-# Derive siteuser from domain name
-derive_siteuser() {
-    local domain=$1
-    local main_domain=$(echo "$domain" | awk -F. '{print $(NF-1)}')
-    local subdomain=$(echo "$domain" | awk -F. '{print $1}')
-
-    if [[ "$subdomain" == "www" || "$subdomain" == "$main_domain" ]]; then
-        echo "$main_domain"
-    else
-        echo "$main_domain-$subdomain"
-    fi
-}
-
-# Check if a CloudPanel domain already exists
-check_domain_exists() {
-    local domain=$1
-    local site_user=$(derive_siteuser "$domain")
-
-    # First, check if the user exists in CloudPanel
-    if clpctl user:list | grep -q "${site_user}"; then
-        return 0 # Domain exists
-    fi
-
-    # Fallback: Check if the home directory for the siteuser exists
-    if [ -d "/home/${site_user}" ]; then
-        return 0 # Domain exists
-    fi
-
-    return 1 # Domain does not exist
-}
-
 # Main installation function
 main_installation() {
-    set -e  # Ensure function fails on any error
+    # Ensure function fails on any error
+    set -e
 
+    # Clear screen and display header
     clear
     echo "========================================="
     echo "   GoAccess Multi-Server Monitoring     "
@@ -121,7 +122,7 @@ main_installation() {
     # Domain configuration
     local GOACCESS_DOMAIN
     while true; do
-        read -p "Enter domain for GoAccess monitoring (e.g., stats.octahexa.com): " GOACCESS_DOMAIN
+        read -p "Enter domain for GoAccess monitoring (e.g., stats.yourdomain.com): " GOACCESS_DOMAIN
         if validate_domain "$GOACCESS_DOMAIN"; then
             break
         else
@@ -129,33 +130,9 @@ main_installation() {
         fi
     done
 
-    # Derive siteuser from domain
+    # Generate site user and password
     local SITE_USER=$(derive_siteuser "$GOACCESS_DOMAIN")
     local SITE_USER_PASSWORD=$(generate_password)
-
-    # Check if the domain already exists
-    if check_domain_exists "$GOACCESS_DOMAIN"; then
-        log_message "Domain $GOACCESS_DOMAIN already exists."
-        echo "Options:"
-        echo "1) Stop the installation"
-        echo "2) Delete the domain and recreate it"
-        read -p "Enter your choice (1-2): " DOMAIN_ACTION
-
-        case $DOMAIN_ACTION in
-            1)
-                log_message "Installation stopped by user."
-                exit 0
-                ;;
-            2)
-                log_message "Deleting existing domain $GOACCESS_DOMAIN..."
-                clpctl site:delete --domainName="$GOACCESS_DOMAIN" --force || error_exit "Failed to delete domain $GOACCESS_DOMAIN."
-                log_message "Domain $GOACCESS_DOMAIN deleted successfully."
-                ;;
-            *)
-                error_exit "Invalid choice. Exiting installation."
-                ;;
-        esac
-    fi
 
     # Log format configuration
     echo ""
@@ -175,7 +152,7 @@ main_installation() {
             LOG_FORMAT_NAME="Cloudflare"
             ;;
         3)
-            read -p "Enter your Nginx log format (e.g., '$remote_addr - $remote_user [$time_local] \"$request\" $status $body_bytes_sent'): " CUSTOM_LOG_FORMAT
+            read -p "Enter your Nginx log format (e.g., '\$remote_addr - \$remote_user [\$time_local] \"\$request\" \$status \$body_bytes_sent'): " CUSTOM_LOG_FORMAT
             GOACCESS_LOG_FORMAT=$(nginx2goaccess "$CUSTOM_LOG_FORMAT")
             LOG_FORMAT_NAME="Custom"
             echo "Converted GoAccess Log Format: $GOACCESS_LOG_FORMAT"
@@ -190,39 +167,64 @@ main_installation() {
 
     # Server configuration
     local REMOTE_SERVERS=()
-    while true; do
-        read -p "Enter a remote CloudPanel server to monitor (format: user@hostname, or leave blank to finish): " SERVER
-        if [[ -z "$SERVER" ]]; then
-            break
-        fi
-        REMOTE_SERVERS+=("$SERVER")
-    done
+    read -p "Enter the first remote server to monitor (format: user@hostname): " SERVER
 
-    if [[ ${#REMOTE_SERVERS[@]} -eq 0 ]]; then
-        error_exit "No servers were configured. Exiting installation."
+    # Basic validation of server entry
+    if [[ $SERVER =~ ^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+$ ]]; then
+        REMOTE_SERVERS+=("$SERVER")
+    else
+        echo "Invalid server format. Skipping server addition."
     fi
 
     echo ""
+    echo "Server Configuration:"
+    echo "--------------------"
+    echo "To add more servers after installation:"
+    echo "1. Edit /etc/goaccess/monitored_servers"
+    echo "2. Run /usr/local/bin/update-server-monitoring.sh"
+    echo ""
+
+    # Confirm configuration
     echo "Configuration Summary:"
     echo "--------------------"
     echo "Monitoring Domain: $GOACCESS_DOMAIN"
     echo "Site User: $SITE_USER"
     echo "Log Format: $LOG_FORMAT_NAME"
-    echo "Servers to Monitor:"
+    echo "Initial Server to Monitor:"
     for server in "${REMOTE_SERVERS[@]}"; do
         echo "- $server"
     done
-
+    
     read -p "Confirm installation? (y/N): " CONFIRM
     if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
         log_message "Installation cancelled by user."
         return 1
     fi
 
-    # Proceed with installation
-    log_message "Starting GoAccess Multi-Server Monitoring installation..."
+    # Check if domain already exists
+    log_message "Checking if domain already exists..."
+    if check_domain_exists "$GOACCESS_DOMAIN"; then
+        echo "Domain '$GOACCESS_DOMAIN' already exists."
+        while true; do
+            read -p "Do you want to delete and recreate the site? (y/N): " DELETE_EXISTING
+            case $DELETE_EXISTING in
+                [Yy]*)
+                    log_message "Deleting existing site for domain '$GOACCESS_DOMAIN'..."
+                    if ! clpctl site:delete --domainName="$GOACCESS_DOMAIN" --force; then
+                        error_exit "Failed to delete existing domain. Exiting."
+                    fi
+                    break
+                    ;;
+                [Nn]*|"")
+                    log_message "Aborting site creation for existing domain '$GOACCESS_DOMAIN'."
+                    exit 1
+                    ;;
+                *) echo "Please answer y or n." ;;
+            esac
+        done
+    fi
 
-    # Create CloudPanel site as reverse proxy
+    # Proceed to create the site
     log_message "Creating CloudPanel site for GoAccess..."
     clpctl site:add:reverse-proxy \
         --domainName="$GOACCESS_DOMAIN" \
@@ -241,31 +243,35 @@ main_installation() {
     cat > /etc/goaccess/goaccess.conf << EOF
 # GoAccess Configuration with ${LOG_FORMAT_NAME} Log Format
 
+# Time and Date Formats
 time-format %T
 date-format %d/%b/%Y
+
+# Log Format
 log-format $GOACCESS_LOG_FORMAT
 
 # General Options
 port 7890
 real-time-html true
 ws-url wss://${GOACCESS_DOMAIN}
-output /home/${SITE_USER}/public/goaccess/index.html
+output /home/${SITE_USER}/htdocs/${GOACCESS_DOMAIN}/public/index.html
 debug-file /var/log/goaccess/debug.log
+
+# Log Processing Options
+keep-last 30
+load-from-disk true
 
 # Persistent Storage
 db-path /var/lib/goaccess/
 restore true
 persist true
+
+# UI Customization
+html-report-title "Web Server Analytics"
+no-html-last-updated true
 EOF
 
-    # Fetch logs from all remote servers
-    mkdir -p /var/log/goaccess
-    for server in "${REMOTE_SERVERS[@]}"; do
-        log_message "Fetching logs from $server..."
-        rsync -avz "$server:/home/*/logs/nginx/access.log" "/var/log/goaccess/$(basename $server)/"
-    done
-
-    # Credentials document generation
+    # Create credentials file with instructions
     cat > /root/goaccess_monitor_credentials.txt << EOF
 GoAccess Multi-Server Monitoring Credentials
 ============================================
@@ -277,7 +283,13 @@ Log Format: $LOG_FORMAT_NAME
 Monitored Servers:
 $(printf '- %s\n' "${REMOTE_SERVERS[@]}")
 
-Modify Monitoring Configuration:
+SSH KEY LOCATION:
+/home/${SITE_USER}/.ssh/id_ed25519
+
+Generate SSH Key (if not exists):
+ssh-keygen -t ed25519 -f /home/${SITE_USER}/.ssh/id_ed25519 -N ""
+
+MODIFY MONITORING CONFIGURATION:
 1. Add/Remove Servers:
    - Edit server list in /etc/goaccess/monitored_servers
    - Run /usr/local/bin/update-server-monitoring.sh
@@ -290,15 +302,22 @@ Modify Monitoring Configuration:
       echo "user@newserver.example.com" >> /etc/goaccess/monitored_servers
       /usr/local/bin/update-server-monitoring.sh
 
+3. Remove a Server:
+   a) Remove server from /etc/goaccess/monitored_servers
+   b) Run /usr/local/bin/update-server-monitoring.sh
+
+SECURITY NOTES:
+- Protect the SSH private key
+- Use key-based authentication
+- Limit SSH access
+
 Access Web Analytics:
 https://$GOACCESS_DOMAIN
 EOF
 
-    chmod 600 /root/goaccess_monitor_credentials.txt
-
     # Final success message
     log_message "GoAccess Multi-Server Monitoring installation completed successfully!"
-    echo "Access the monitoring dashboard at: https://$GOACCESS_DOMAIN"
+    
     return 0
 }
 
@@ -324,6 +343,7 @@ main() {
             echo "Installation cancelled. GoAccess is already set up."
             exit 0
         fi
+        # If user chooses to reconfigure, continue with the script
     fi
 
     # Run main installation with error handling
