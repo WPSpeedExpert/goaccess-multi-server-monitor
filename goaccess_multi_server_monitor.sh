@@ -4,8 +4,6 @@
 # Description:       Interactive GoAccess multi-server monitoring setup
 # Version:           1.3.3
 # Author:            OctaHexa Media LLC
-# Credits:           Nginx to GoAccess log format conversion based on 
-#                    https://github.com/stockrt/nginx2goaccess
 # Last Modified:     2025-02-09
 # Dependencies:      Debian 12, CloudPanel
 # =========================================================================== #
