@@ -2,7 +2,7 @@
 # =========================================================================== #
 # Script Name:       goaccess_multi_server_monitor.sh
 # Description:       Interactive GoAccess multi-server monitoring setup
-# Version:           1.4.6
+# Version:           1.4.7
 # Author:            OctaHexa Media LLC
 # Last Modified:     2025-02-10
 # Dependencies:      Debian 12, CloudPanel
@@ -283,61 +283,78 @@ main_installation() {
     # Comprehensive domain check and cleanup
     domain_cleanup() {
         local domain=$1
+        local clean_status=0
 
-        # Stop any running services
-        systemctl stop nginx || true
+        log_message "Starting thorough domain cleanup..."
 
-        # Remove from CloudPanel if exists
-        if clpctl site:list 2>/dev/null | grep -q "$domain"; then
-            log_message "Removing domain from CloudPanel..."
-            clpctl site:delete --domainName="$domain" --force || true
-        fi
+        # Stop services that might lock files
+        systemctl stop nginx 2>/dev/null || true
+        systemctl stop php-fpm* 2>/dev/null || true
 
-        # Clean up Nginx configurations
-        rm -f "/etc/nginx/sites-enabled/$domain.conf" || true
-        rm -f "/etc/nginx/sites-available/$domain.conf" || true
+        # Force remove from CloudPanel
+        for i in {1..3}; do
+            if clpctl site:list 2>/dev/null | grep -q "$domain"; then
+                log_message "Attempt $i: Removing domain from CloudPanel..."
+                clpctl site:delete --domainName="$domain" --force
+                sleep 3
+            else
+                break
+            fi
+        done
 
-        # Clean up SSL certificates
-        rm -rf "/etc/letsencrypt/live/$domain" || true
-        rm -rf "/etc/letsencrypt/archive/$domain" || true
-
-        # Clean up site directory if exists
+        # Aggressive cleanup of all related files and directories
         local site_user=$(derive_siteuser "$domain")
-        if [ -d "/home/$site_user/htdocs/$domain" ]; then
-            rm -rf "/home/$site_user/htdocs/$domain" || true
-        fi
+        local cleanup_paths=(
+            "/etc/nginx/sites-enabled/$domain.conf"
+            "/etc/nginx/sites-available/$domain.conf"
+            "/etc/nginx/sites.d/$domain.conf"
+            "/etc/letsencrypt/live/$domain"
+            "/etc/letsencrypt/archive/$domain"
+            "/etc/letsencrypt/renewal/$domain.conf"
+            "/home/$site_user/htdocs/$domain"
+        )
 
-        # Restart Nginx
-        systemctl start nginx || true
+        for path in "${cleanup_paths[@]}"; do
+            if [ -e "$path" ]; then
+                log_message "Removing: $path"
+                rm -rf "$path" || clean_status=1
+            fi
+        done
 
-        # Wait for cleanup
+        # Restart services
+        systemctl restart nginx 2>/dev/null || true
+        systemctl restart php-fpm* 2>/dev/null || true
+
+        # Final verification
         sleep 3
-
-        # Verify cleanup
         if clpctl site:list 2>/dev/null | grep -q "$domain" || \
            [ -f "/etc/nginx/sites-enabled/$domain.conf" ] || \
            [ -f "/etc/nginx/sites-available/$domain.conf" ]; then
             return 1
         fi
-        return 0
+
+        return $clean_status
     }
 
-    if check_domain_exists "$GOACCESS_DOMAIN"; then
+    # Check and cleanup existing domain
+    if clpctl site:list 2>/dev/null | grep -q "$GOACCESS_DOMAIN" || \
+       [ -f "/etc/nginx/sites-enabled/$GOACCESS_DOMAIN.conf" ] || \
+       [ -f "/etc/nginx/sites-available/$GOACCESS_DOMAIN.conf" ]; then
         echo "Domain '$GOACCESS_DOMAIN' already exists."
         while true; do
-            read -p "Do you want to delete and recreate the site? (y/N): " DELETE_EXISTING
+            read -p "Do you want to delete and recreate the site? (Y/n): " DELETE_EXISTING
             case $DELETE_EXISTING in
-                [Yy]*)
-                    log_message "Deleting existing site for domain '$GOACCESS_DOMAIN'..."
-                    if ! domain_cleanup "$GOACCESS_DOMAIN"; then
-                        error_exit "Failed to fully clean up domain. Please remove manually and try again."
-                    fi
-                    log_message "Domain cleanup completed successfully."
-                    break
-                    ;;
-                [Nn]*|"")
+                [Nn]*)
                     log_message "Installation aborted by user - domain exists"
                     exit 0
+                    ;;
+                [Yy]*|"")
+                    log_message "Deleting existing site for domain '$GOACCESS_DOMAIN'..."
+                    if ! domain_cleanup "$GOACCESS_DOMAIN"; then
+                        log_message "WARNING: Some cleanup operations failed, but continuing anyway..."
+                    fi
+                    log_message "Domain cleanup completed."
+                    break
                     ;;
                 *) echo "Please answer y or n." ;;
             esac
@@ -379,7 +396,7 @@ main_installation() {
         local REMOTE_SERVERS=()
         echo "Server Configuration:"
         echo "Enter remote servers to monitor (leave blank to finish)"
-        echo "Format: user@hostname"
+        echo "Format: root@hostname (requires root access)"
         echo "--------------------"
 
         while true; do
