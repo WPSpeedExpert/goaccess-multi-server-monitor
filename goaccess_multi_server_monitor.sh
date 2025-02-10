@@ -2,7 +2,7 @@
 # =========================================================================== #
 # Script Name:       goaccess_multi_server_monitor.sh
 # Description:       Interactive GoAccess multi-server monitoring setup
-# Version:           1.4.7
+# Version:           1.4.8
 # Author:            OctaHexa Media LLC
 # Last Modified:     2025-02-10
 # Dependencies:      Debian 12, CloudPanel
