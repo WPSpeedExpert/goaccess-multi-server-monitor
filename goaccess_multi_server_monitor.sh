@@ -2,7 +2,7 @@
 # =========================================================================== #
 # Script Name:       goaccess_multi_server_monitor.sh
 # Description:       Interactive GoAccess multi-server monitoring setup
-# Version:           1.4.8
+# Version:           1.4.9
 # Author:            OctaHexa Media LLC
 # Last Modified:     2025-02-10
 # Dependencies:      Debian 12, CloudPanel
@@ -93,27 +93,7 @@ validate_domain() {
     fi
 }
 
-# 3.2. Domain Existence Check
-#---------------------------------------
-# Check if the domain exists in CloudPanel
-check_domain_exists() {
-    local domain=$1
-    local exists=0
-
-    # Try using clpctl to list sites and grep for the domain
-    if clpctl site:list 2>/dev/null | grep -q "$domain"; then
-        exists=1
-    fi
-
-    # Check nginx configuration as backup
-    if [ -f "/etc/nginx/sites-enabled/$domain.conf" ]; then
-        exists=1
-    fi
-
-    return $exists
-}
-
-# 3.3. Site User Generation
+# 3.2. Site User Generation
 #---------------------------------------
 # Derive site user from domain
 derive_siteuser() {
@@ -126,6 +106,87 @@ derive_siteuser() {
     else
         echo "$main_domain-$subdomain"
     fi
+}
+
+# 3.3. Domain Existence Check
+#---------------------------------------
+# Thorough domain existence check
+domain_exists() {
+    local domain=$1
+    local site_user=$(derive_siteuser "$domain")
+
+    # Check all possible existence conditions
+    if clpctl site:list 2>/dev/null | grep -q "$domain" || \
+       [ -f "/etc/nginx/sites-enabled/$domain.conf" ] || \
+       [ -f "/etc/nginx/sites-available/$domain.conf" ] || \
+       [ -d "/etc/letsencrypt/live/$domain" ] || \
+       [ -d "/home/$site_user/htdocs/$domain" ]; then
+        return 0
+    fi
+    return 1
+}
+
+# 3.4. Domain Cleanup
+#---------------------------------------
+# Comprehensive domain cleanup
+cleanup_domain() {
+    local domain=$1
+    local site_user=$(derive_siteuser "$domain")
+    local max_attempts=3
+    local attempt=1
+    local cleanup_success=false
+
+    while [ $attempt -le $max_attempts ] && [ "$cleanup_success" = false ]; do
+        log_message "Cleanup attempt $attempt of $max_attempts..."
+
+        # Stop all related services
+        systemctl stop nginx || true
+        systemctl stop "php*-fpm" || true
+
+        # Remove from CloudPanel with multiple attempts
+        for i in {1..3}; do
+            clpctl site:delete --domainName="$domain" --force || true
+            sleep 2
+        done
+
+        # Clean up all possible files and directories
+        local cleanup_paths=(
+            "/etc/nginx/sites-enabled/$domain.conf"
+            "/etc/nginx/sites-available/$domain.conf"
+            "/etc/nginx/conf.d/$domain.conf"
+            "/etc/letsencrypt/live/$domain"
+            "/etc/letsencrypt/archive/$domain"
+            "/etc/letsencrypt/renewal/$domain.conf"
+            "/home/$site_user/htdocs/$domain"
+        )
+
+        for path in "${cleanup_paths[@]}"; do
+            rm -rf "$path" || true
+        done
+
+        # Restart services
+        systemctl restart nginx || true
+        systemctl restart "php*-fpm" || true
+
+        # Wait for services to fully restart
+        sleep 5
+
+        # Verify cleanup
+        if ! domain_exists "$domain"; then
+            cleanup_success=true
+            break
+        fi
+
+        ((attempt++))
+        sleep 3
+    done
+
+    if [ "$cleanup_success" = false ]; then
+        log_message "WARNING: Could not fully clean up domain after $max_attempts attempts."
+        return 1
+    fi
+
+    return 0
 }
 
 #===============================================
