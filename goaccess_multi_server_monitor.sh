@@ -2,7 +2,7 @@
 # =========================================================================== #
 # Script Name:       goaccess_multi_server_monitor.sh
 # Description:       Interactive GoAccess multi-server monitoring setup
-# Version:           1.4.5
+# Version:           1.4.6
 # Author:            OctaHexa Media LLC
 # Last Modified:     2025-02-10
 # Dependencies:      Debian 12, CloudPanel
@@ -276,37 +276,70 @@ main_installation() {
     local SITE_USER=$(derive_siteuser "$GOACCESS_DOMAIN")
     local SITE_USER_PASSWORD=$(generate_password)
 
-    # 7.3. Domain Existence Check
+    # 7.3. Domain Existence Check and Cleanup
     #---------------------------------------
     log_message "Checking if domain already exists..."
+
+    # Comprehensive domain check and cleanup
+    domain_cleanup() {
+        local domain=$1
+
+        # Stop any running services
+        systemctl stop nginx || true
+
+        # Remove from CloudPanel if exists
+        if clpctl site:list 2>/dev/null | grep -q "$domain"; then
+            log_message "Removing domain from CloudPanel..."
+            clpctl site:delete --domainName="$domain" --force || true
+        fi
+
+        # Clean up Nginx configurations
+        rm -f "/etc/nginx/sites-enabled/$domain.conf" || true
+        rm -f "/etc/nginx/sites-available/$domain.conf" || true
+
+        # Clean up SSL certificates
+        rm -rf "/etc/letsencrypt/live/$domain" || true
+        rm -rf "/etc/letsencrypt/archive/$domain" || true
+
+        # Clean up site directory if exists
+        local site_user=$(derive_siteuser "$domain")
+        if [ -d "/home/$site_user/htdocs/$domain" ]; then
+            rm -rf "/home/$site_user/htdocs/$domain" || true
+        fi
+
+        # Restart Nginx
+        systemctl start nginx || true
+
+        # Wait for cleanup
+        sleep 3
+
+        # Verify cleanup
+        if clpctl site:list 2>/dev/null | grep -q "$domain" || \
+           [ -f "/etc/nginx/sites-enabled/$domain.conf" ] || \
+           [ -f "/etc/nginx/sites-available/$domain.conf" ]; then
+            return 1
+        fi
+        return 0
+    }
+
     if check_domain_exists "$GOACCESS_DOMAIN"; then
         echo "Domain '$GOACCESS_DOMAIN' already exists."
-        echo "Options:"
-        echo "1. Delete existing site and continue"
-        echo "2. Abort installation"
-
         while true; do
-            read -p "Choose an option (1/2): " DOMAIN_CHOICE
-            case $DOMAIN_CHOICE in
-                1)
+            read -p "Do you want to delete and recreate the site? (y/N): " DELETE_EXISTING
+            case $DELETE_EXISTING in
+                [Yy]*)
                     log_message "Deleting existing site for domain '$GOACCESS_DOMAIN'..."
-                    if ! clpctl site:delete --domainName="$GOACCESS_DOMAIN" --force; then
-                        error_exit "Failed to delete existing domain. Exiting."
+                    if ! domain_cleanup "$GOACCESS_DOMAIN"; then
+                        error_exit "Failed to fully clean up domain. Please remove manually and try again."
                     fi
-                    # Wait for cleanup
-                    sleep 5
-                    # Verify deletion
-                    if check_domain_exists "$GOACCESS_DOMAIN"; then
-                        error_exit "Failed to delete domain. Please remove manually and try again."
-                    fi
-                    log_message "Domain deleted successfully."
+                    log_message "Domain cleanup completed successfully."
                     break
                     ;;
-                2)
+                [Nn]*|"")
                     log_message "Installation aborted by user - domain exists"
                     exit 0
                     ;;
-                *) echo "Please enter 1 or 2." ;;
+                *) echo "Please answer y or n." ;;
             esac
         done
     fi
